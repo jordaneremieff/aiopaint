@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
+    <style type="text/css">
+    body {
+        font-family: 'Open Sans', sans-serif;
+        font-size: 20px;
+        background: #fff;
+    }
+
+    #canvas {
+        height: 500;
+        width: 500;
+        border: 1px solid black;
+    }
+    </style>
+</head>
+
+<body>
+    <h1>aiopaint</h1>
+    <canvas id="canvas"></canvas>
+    <script>
+    var canvas = document.getElementById('canvas');
+    var context = canvas.getContext('2d');
+    var ws = new WebSocket("ws://localhost:8000/ws");
+    var isDrawing;
+
+    ws.onmessage = function(msg) {
+        data = JSON.parse(msg.data);
+        handleUpdate(data.xPos, data.yPos, data.mousePos);
+    };
+
+    function handleUpdate(xPos, yPos, mousePos) {
+        context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+        context.strokeStyle = "#000000";
+        context.lineJoin = "round";
+        context.lineWidth = 3;
+        for (var i = 0; i < xPos.length; i++) {
+            context.beginPath();
+            if (mousePos[i] && i) {
+                context.moveTo(xPos[i - 1], yPos[i - 1]);
+            } else {
+                context.moveTo(xPos[i] - 1, yPos[i]);
+            }
+            context.lineTo(xPos[i], yPos[i]);
+            context.closePath();
+            context.stroke();
+        }
+    }
+
+    function handleDraw(xPos, yPos, mousePos) {
+        ws.send(JSON.stringify({
+            "x": xPos,
+            "y": yPos,
+            "mousePos": mousePos
+        }))
+
+    }
+
+    canvas.addEventListener('mousemove', function(e) {
+        if (isDrawing) {
+            handleDraw(e.pageX - this.offsetLeft, e.pageY - this.offsetTop, true);
+        }
+    });
+
+    canvas.addEventListener('mousedown', function(e) {
+        isDrawing = true;
+        handleDraw(e.pageX - this.offsetLeft, e.pageY - this.offsetTop);
+
+    });
+
+    canvas.addEventListener('mouseup', function(e) {
+        isDrawing = false;
+    });
+
+    canvas.addEventListener('mouseleave', function(e) {
+        isDrawing = false;
+    });
+    </script>
+</body>
+
+</html>
