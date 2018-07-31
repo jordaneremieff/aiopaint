@@ -1,53 +1,55 @@
 import json
-from starlette import HTMLResponse
+from starlette.types import Scope, Receive, Send
 from starlette.routing import Router, Path
-from jinja2 import Environment, FileSystemLoader
-
-from helpers import WebSocketConsumer
+from starlette.staticfiles import StaticFile
 
 
-env = Environment(loader=FileSystemLoader("templates"))
-template = env.get_template("index.html").render()
+class WebSocketDisconnect(Exception):
+    """Raised when disconnecting the websocket consumer"""
 
 
 class PaintApp:
-
-    x_pos = []
-    y_pos = []
-    mouse_pos = []
-
-    def on_draw(self, data):
-        self.x_pos.append(data["x"])
-        self.y_pos.append(data["y"])
-        mouse_pos = data.get("mousePos", False)
-        self.mouse_pos.append(mouse_pos)
-
-    @property
-    def as_json(self):
-        data = {"xPos": self.x_pos, "yPos": self.y_pos, "mousePos": self.mouse_pos}
-        return json.dumps(data)
-
-
-class HTMLApp:
-    def __init__(self, scope):
+    def __init__(self, scope: Scope) -> None:
         self.scope = scope
+        self.x_coordinates = []
+        self.y_coordinates = []
+        self.drag_states = []
 
-    async def __call__(self, receive, send):
-        response = HTMLResponse(template)
-        await response(receive, send)
+    async def __call__(self, receive: Receive, send: Send) -> None:
+        self.send = send
 
+        try:
+            while True:
+                message = await receive()
+                await self.handle(message)
+        except WebSocketDisconnect:
+            return
 
-class WebSocketApp(WebSocketConsumer):
+    async def handle(self, message: dict) -> None:
+        message_type = message["type"].replace(".", "_")
+        handler = getattr(self, message_type)
+        await handler(message)
 
-    paint = PaintApp()
-
-    async def websocket_connect(self, message):
+    async def websocket_connect(self, message: dict) -> None:
         await self.send({"type": "websocket.accept"})
 
-    async def websocket_receive(self, message):
-        data = json.loads(message["text"])
-        self.paint.on_draw(data)
-        await self.send({"type": "websocket.send", "text": self.paint.as_json})
+    async def websocket_receive(self, message: dict) -> None:
+        input_data = json.loads(message["text"])
+        self.x_coordinates.append(input_data["x_pos"])
+        self.y_coordinates.append(input_data["y_pos"])
+        self.drag_states.append(input_data.get("is_dragging", False))
+        output_data = json.dumps(
+            {
+                "x_coordinates": self.x_coordinates,
+                "y_coordinates": self.y_coordinates,
+                "drag_states": self.drag_states,
+            }
+        )
+        await self.send({"type": "websocket.send", "text": output_data})
+
+    async def websocket_disconnect(self, message: dict) -> None:
+        await self.send({"type": "websocket.close"})
+        raise WebSocketDisconnect()
 
 
-app = Router([Path("/", app=HTMLApp), Path("/ws", app=WebSocketApp)])
+app = Router([Path("/", app=StaticFile(path="index.html")), Path("/ws/", app=PaintApp)])

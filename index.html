@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style type="text/css">
+    body {
+        font-size: 20px;
+        background: #fff;
+    }
+
+    #canvas {
+        height: 500;
+        width: 500;
+        border: 1px solid black;
+    }
+</style>
+</head>
+
+<body>
+    <h1>aiopaint</h1>
+    <canvas id="canvas"></canvas>
+    <script>
+        var canvas = document.getElementById('canvas');
+        var context = canvas.getContext('2d');
+        var ws = new WebSocket("ws://localhost:8000/ws/");
+        var isDrawing;
+
+        ws.onmessage = function(msg) {
+            data = JSON.parse(msg.data);
+            handleUpdate(data.x_coordinates, data.y_coordinates, data.drag_states);
+        };
+
+        function handleUpdate(xPos, yPos, dragStates) {
+            context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+            context.strokeStyle = "#000000";
+            context.lineJoin = "round";
+            context.lineWidth = 3;
+            for (var i = 0; i < xPos.length; i++) {
+                context.beginPath();
+                if (dragStates[i] && i) {
+                    context.moveTo(xPos[i - 1], yPos[i - 1]);
+                } else {
+                    context.moveTo(xPos[i] - 1, yPos[i]);
+                }
+                context.lineTo(xPos[i], yPos[i]);
+                context.closePath();
+                context.stroke();
+            }
+        }
+
+        function handleDraw(xPos, yPos, isDragging) {
+            ws.send(JSON.stringify({
+                "x_pos": xPos,
+                "y_pos": yPos,
+                "is_dragging": isDragging
+            }))
+
+        }
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (isDrawing) {
+                handleDraw(e.pageX - this.offsetLeft, e.pageY - this.offsetTop, true);
+            }
+        });
+
+        canvas.addEventListener('mousedown', function(e) {
+            isDrawing = true;
+            handleDraw(e.pageX - this.offsetLeft, e.pageY - this.offsetTop);
+
+        });
+
+        canvas.addEventListener('mouseup', function(e) {
+            isDrawing = false;
+        });
+
+        canvas.addEventListener('mouseleave', function(e) {
+            isDrawing = false;
+        });
+    </script>
+</body>
+</html>
