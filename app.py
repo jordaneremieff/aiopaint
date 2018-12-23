@@ -1,55 +1,66 @@
 import json
-from starlette.types import Scope, Receive, Send
-from starlette.routing import Router, Path
-from starlette.staticfiles import StaticFile
+from typing import List
+from dataclasses import dataclass, field
+
+from starlette.endpoints import HTTPEndpoint, WebSocketEndpoint
+from starlette.responses import TemplateResponse
+from starlette.applications import Starlette
 
 
-class WebSocketDisconnect(Exception):
-    """Raised when disconnecting the websocket consumer"""
+app = Starlette(template_directory="templates")
 
 
-class PaintApp:
-    def __init__(self, scope: Scope) -> None:
-        self.scope = scope
-        self.x_coordinates = []
-        self.y_coordinates = []
-        self.drag_states = []
+@dataclass
+class Canvas:
 
-    async def __call__(self, receive: Receive, send: Send) -> None:
-        self.send = send
+    x_coordinates: List = field(default_factory=list)
+    y_coordinates: List = field(default_factory=list)
+    drag_states: List = field(default_factory=list)
 
-        try:
-            while True:
-                message = await receive()
-                await self.handle(message)
-        except WebSocketDisconnect:
-            return
+    def add_x(self, x_pos: int) -> None:
+        self.x_coordinates.append(x_pos)
 
-    async def handle(self, message: dict) -> None:
-        message_type = message["type"].replace(".", "_")
-        handler = getattr(self, message_type)
-        await handler(message)
+    def add_y(self, y_pos: int) -> None:
+        self.y_coordinates.append(y_pos)
 
-    async def websocket_connect(self, message: dict) -> None:
-        await self.send({"type": "websocket.accept"})
+    def add_state(self, drag_state: bool) -> None:
+        self.drag_states.append(drag_state)
 
-    async def websocket_receive(self, message: dict) -> None:
-        input_data = json.loads(message["text"])
-        self.x_coordinates.append(input_data["x_pos"])
-        self.y_coordinates.append(input_data["y_pos"])
-        self.drag_states.append(input_data.get("is_dragging", False))
-        output_data = json.dumps(
+    @property
+    def json(self) -> str:
+        return json.dumps(
             {
                 "x_coordinates": self.x_coordinates,
                 "y_coordinates": self.y_coordinates,
                 "drag_states": self.drag_states,
             }
         )
-        await self.send({"type": "websocket.send", "text": output_data})
-
-    async def websocket_disconnect(self, message: dict) -> None:
-        await self.send({"type": "websocket.close"})
-        raise WebSocketDisconnect()
 
 
-app = Router([Path("/", app=StaticFile(path="index.html")), Path("/ws/", app=PaintApp)])
+@app.route("/")
+class CanvasHome(HTTPEndpoint):
+    async def get(self, request) -> TemplateResponse:
+        context = {"request": request, "WEBSOCKET_URL": "ws://localhost:8000/ws"}
+        template = app.get_template("index.html")
+        return TemplateResponse(template, context)
+
+
+@app.websocket_route("/ws")
+class CanvasWebSocket(WebSocketEndpoint):
+
+    encoding = "json"
+    canvas = None
+
+    async def on_connect(self, websocket) -> None:
+        await websocket.accept()
+        self.canvas = Canvas()
+
+    async def on_receive(self, websocket, message) -> None:
+        x_pos = message["x_pos"]
+        y_pos = message["y_pos"]
+        self.canvas.add_x(x_pos)
+        self.canvas.add_y(y_pos)
+        is_dragging = message.get("is_dragging", False)
+        self.canvas.add_state(is_dragging)
+
+        await websocket.send_text(self.canvas.json)

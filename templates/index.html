@@ -19,9 +19,10 @@
     <h1>aiopaint</h1>
     <canvas id="canvas"></canvas>
     <script>
+
         var canvas = document.getElementById('canvas');
         var context = canvas.getContext('2d');
-        var ws = new WebSocket("ws://localhost:8000/ws/");
+        var ws = new WebSocket("{{ WEBSOCKET_URL }}");
         var isDrawing;
 
         ws.onmessage = function(msg) {
